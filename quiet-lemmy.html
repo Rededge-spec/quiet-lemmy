@@ -1,0 +1,378 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="referrer" content="no-referrer">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; connect-src https:; img-src https: data:; base-uri 'none'; form-action 'none'">
+<meta name="theme-color" content="#181818">
+<title>Quiet Lemmy</title>
+<style>
+:root{color-scheme:dark;--bg:#121212;--fg:#e8e6e3;--mut:#9a9a9a;--acc:#8ab4f8;--line:#2a2a2a}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--fg);font:17px/1.5 system-ui,-apple-system,sans-serif;-webkit-text-size-adjust:100%}
+header{position:sticky;top:0;display:flex;gap:8px;align-items:center;padding:10px 12px;background:#181818;border-bottom:1px solid var(--line);z-index:2}
+.where{flex:1;font-size:14px;color:var(--mut);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+button{font:inherit;font-size:15px;color:var(--fg);background:#2a2a2a;border:0;border-radius:8px;padding:8px 12px;cursor:pointer}
+button.ghost{background:none;color:var(--acc);padding-left:0}
+a{color:var(--acc)}
+h1{font-size:21px;line-height:1.3;margin:6px 0}
+h2{font-size:18px;line-height:1.3;margin:4px 0;font-weight:600}
+h2 a{color:var(--fg);text-decoration:none}
+main{max-width:760px;margin:0 auto}
+.card,.full{padding:12px 14px;border-bottom:1px solid var(--line)}
+.meta{font-size:14px;color:var(--mut)}
+.meta a{color:var(--mut)}
+.comm{background:none;padding:0;color:var(--acc);font-size:14px}
+.lnk{font-size:14px;margin:2px 0}
+.imgbtn{display:block;margin:8px 0;font-size:14px;background:#1f2a36;text-align:left}
+.pic{display:block;max-width:100%;height:auto;margin:8px 0;border-radius:6px}
+.body,.cmt{overflow-wrap:anywhere}
+.p{margin:6px 0}
+pre{overflow-x:auto;background:#1c1c1c;padding:8px;border-radius:6px;font-size:14px;white-space:pre}
+code{background:#1c1c1c;padding:1px 4px;border-radius:4px;font-size:.9em}
+blockquote{margin:6px 0;padding-left:10px;border-left:3px solid #444;color:#bbb}
+#cm{padding:4px 12px 40px;max-width:760px;margin:0 auto}
+.cmt{margin:8px 0 0;padding-left:9px;border-left:2px solid #333}
+#cm>.cmt{border-left:0;padding-left:0;border-top:1px solid var(--line);padding-top:8px}
+.cmt summary{font-size:13px;color:var(--mut);cursor:pointer;list-style:none}
+.cmt summary::-webkit-details-marker{display:none}
+.cmt summary::before{content:"− "}
+.cmt:not([open])>summary::before{content:"+ "}
+#settings{padding:12px 14px;border-bottom:1px solid var(--line);background:#161616;max-width:760px;margin:0 auto}
+#settings label{display:block;margin:10px 0}
+#settings h3{font-size:16px;margin:18px 0 4px}
+input,select{font:inherit;font-size:16px;color:var(--fg);background:#222;border:1px solid #333;border-radius:8px;padding:8px;width:100%}
+input[type=checkbox]{width:auto;margin-right:6px}
+.row{display:flex;gap:8px;margin:8px 0}
+.res{display:block;width:100%;text-align:left;padding:8px 0;font-size:15px}
+.res small{color:var(--mut)}
+.note{font-size:13px;color:var(--mut);margin:12px 0 0}
+#more{display:block;margin:16px auto 40px}
+#msg{text-align:center;color:var(--mut);padding:16px}
+#msg:empty{display:none}
+[hidden]{display:none!important}
+</style>
+</head>
+<body>
+<header>
+  <button id="back" hidden>‹ Back</button>
+  <div id="where" class="where"></div>
+  <button id="setBtn">Settings</button>
+</header>
+
+<section id="settings" hidden>
+  <label>Server
+    <input id="inst" placeholder="lemmy.world" autocapitalize="off" autocorrect="off" spellcheck="false" inputmode="url">
+  </label>
+  <label>Show
+    <select id="type"><option value="All">Posts from all servers</option><option value="Local">This server only</option></select>
+  </label>
+  <label>Sort
+    <select id="sort">
+      <option value="Hot">Hot</option><option value="Active">Active</option><option value="New">New</option>
+      <option value="TopDay">Top today</option><option value="TopWeek">Top this week</option><option value="TopMonth">Top this month</option>
+    </select>
+  </label>
+  <label><input type="checkbox" id="remember">Remember these settings on this device</label>
+  <div class="row"><button id="apply">Apply</button><button id="forget" class="ghost">Forget saved settings</button></div>
+
+  <h3>Community</h3>
+  <div class="row"><input id="q" placeholder="Search communities" autocapitalize="off"><button id="qgo">Search</button></div>
+  <div id="qres"></div>
+  <button id="clearComm" class="ghost">Show all communities</button>
+
+  <p class="note">This page only talks to the server named above. No account, no tracking, no ads. Images and links load only when you tap them. Tracking tags are removed from links. NSFW posts are hidden.</p>
+</section>
+
+<main id="feed"></main>
+<button id="more" hidden>Load more</button>
+<main id="postView" hidden></main>
+<div id="msg"></div>
+
+<script>
+'use strict';
+const $ = s => document.querySelector(s);
+
+// ---------- settings (stored only if the user opts in) ----------
+const KEY = 'quietLemmy';
+const store = {
+  get(){ try { return JSON.parse(localStorage.getItem(KEY) || 'null'); } catch(e){ return null; } },
+  set(v){ try { localStorage.setItem(KEY, JSON.stringify(v)); } catch(e){} },
+  clear(){ try { localStorage.removeItem(KEY); } catch(e){} }
+};
+const DEFAULTS = { inst:'lemmy.world', type:'All', sort:'Hot', comm:'', remember:false };
+const S = Object.assign({}, DEFAULTS, store.get() || {});
+function save(){ if (S.remember) store.set(S); else store.clear(); }
+
+// ---------- helpers ----------
+function esc(s){ return String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
+function host(u){ try { return new URL(u).host; } catch(e){ return ''; } }
+function msg(t){ $('#msg').textContent = t || ''; }
+
+const TRACK = /^(utm_.*|fbclid|gclid|dclid|gbraid|wbraid|msclkid|yclid|twclid|igshid|mc_eid|mc_cid|_hsenc|_hsmi|si|ref_src|ref_url|spm|share_id)$/i;
+function clean(u){
+  try {
+    const x = new URL(u);
+    if (!/^https?:$/.test(x.protocol)) return null;
+    [...x.searchParams.keys()].forEach(k => { if (TRACK.test(k)) x.searchParams.delete(k); });
+    return x.toString();
+  } catch(e){ return null; }
+}
+function link(u, text){
+  const c = clean(u);
+  if (!c) return esc(text || u);
+  return `<a href="${esc(c)}" target="_blank" rel="noopener noreferrer nofollow">${esc(text || c)}</a>`;
+}
+function imgBtn(u, label){
+  const c = clean(u);
+  if (!c) return '';
+  return `<button class="imgbtn" data-src="${esc(c)}">Show image${label ? ': ' + esc(label) : ''} <span class="meta">(${esc(host(c))})</span></button>`;
+}
+const IMG_RE = /\.(jpe?g|png|gif|webp|avif)(\?|#|$)/i;
+
+function ago(t){
+  if (!t) return '';
+  const iso = /Z$|[+-]\d\d:?\d\d$/.test(t) ? t : t + 'Z';
+  const d = Math.max(0, (Date.now() - Date.parse(iso)) / 1000);
+  if (d < 3600) return Math.max(1, Math.round(d / 60)) + 'm';
+  if (d < 86400) return Math.round(d / 3600) + 'h';
+  if (d < 2592000) return Math.round(d / 86400) + 'd';
+  if (d < 31536000) return Math.round(d / 2592000) + 'mo';
+  return Math.round(d / 31536000) + 'y';
+}
+function fullName(obj){ // community or person -> name, or name@host if remote
+  const h = host(obj.actor_id);
+  return h && h !== S.inst ? obj.name + '@' + h : obj.name;
+}
+
+// ---------- minimal, safe markdown ----------
+function md(src){
+  const keep = [];
+  const K = h => '\u0000' + (keep.push(h) - 1) + '\u0000';
+  let s = String(src || '').replace(/\r/g, '');
+  s = s.replace(/```[^\n]*\n([\s\S]*?)```/g, (m, c) => K('<pre>' + esc(c) + '</pre>'));
+  s = s.replace(/`([^`\n]+)`/g, (m, c) => K('<code>' + esc(c) + '</code>'));
+  s = s.replace(/!\[([^\]]*)\]\(([^)\s]+)[^)]*\)/g, (m, a, u) => K(imgBtn(u, a)));
+  s = s.replace(/\[([^\]]+)\]\(([^)\s]+)[^)]*\)/g, (m, t, u) => K(link(u, t)));
+  s = s.replace(/https?:\/\/[^\s<>()\u0000]+/g, u => {
+    let tail = '';
+    while (/[.,;:!?'"]$/.test(u)) { tail = u.slice(-1) + tail; u = u.slice(0, -1); }
+    return (IMG_RE.test(u) ? K(imgBtn(u)) : K(link(u))) + tail;
+  });
+  s = esc(s);
+  s = s.replace(/\*\*([^*\n]+)\*\*/g, '<b>$1</b>')
+       .replace(/(^|[^*\w])\*([^*\n]+)\*/g, '$1<i>$2</i>')
+       .replace(/(^|[^_\w])_([^_\n]+)_(?!\w)/g, '$1<i>$2</i>')
+       .replace(/~~([^~\n]+)~~/g, '<s>$1</s>');
+  s = s.split(/\n{2,}/).map(b => {
+    b = b.replace(/^\n+|\n+$/g, '');
+    if (!b) return '';
+    if (/^&gt;/.test(b)) return '<blockquote>' + b.replace(/^&gt;\s?/gm, '').replace(/\n/g, '<br>') + '</blockquote>';
+    if (/^#{1,6}\s/.test(b)) return '<div class="p"><b>' + b.replace(/^#{1,6}\s+/, '').replace(/\n/g, '<br>') + '</b></div>';
+    if (/^:::\s*spoiler/.test(b)) return '<details><summary>Spoiler</summary>' + b.replace(/^:::\s*spoiler[^\n]*\n?/, '').replace(/\n?:::$/, '').replace(/\n/g, '<br>') + '</details>';
+    return '<div class="p">' + b.replace(/\n/g, '<br>') + '</div>';
+  }).join('');
+  return s.replace(/\u0000(\d+)\u0000/g, (m, i) => keep[+i]);
+}
+
+// ---------- API (no cookies, no referrer) ----------
+async function api(path, params){
+  const u = new URL('https://' + S.inst + '/api/v3/' + path);
+  Object.entries(params).forEach(([k, v]) => { if (v !== '' && v != null) u.searchParams.set(k, v); });
+  const r = await fetch(u, { credentials:'omit', referrerPolicy:'no-referrer', cache:'no-store' });
+  if (!r.ok) throw new Error('The server replied with error ' + r.status + '.');
+  return r.json();
+}
+function errText(e){
+  if (e instanceof TypeError) return "Couldn't reach " + S.inst + ". Check the address and your connection. Some servers block outside apps.";
+  return e.message || 'Something went wrong.';
+}
+
+// ---------- feed ----------
+let page = 1, loading = false, gen = 0, moreAvail = false, feedScroll = 0;
+const posts = new Map();
+
+function card(pv){
+  const p = pv.post, c = pv.community, n = pv.counts;
+  const isImg = p.url && IMG_RE.test(p.url);
+  return `<article class="card">
+    <div class="meta"><button class="comm" data-c="${esc(fullName(c))}">${esc(fullName(c))}</button> · ${ago(p.published)}</div>
+    <h2><a href="#p${p.id}">${esc(p.name)}</a></h2>
+    ${p.url && !isImg ? `<div class="lnk">${link(p.url, host(p.url))}</div>` : ''}
+    ${isImg ? imgBtn(p.url) : ''}
+    <div class="meta">▲ ${n.score} · <a href="#p${p.id}">${n.comments} comments</a></div>
+  </article>`;
+}
+
+async function loadFeed(reset){
+  if (reset){ gen++; page = 1; posts.clear(); $('#feed').innerHTML = ''; loading = false; moreAvail = false; $('#more').hidden = true; }
+  if (loading) return;
+  loading = true;
+  const my = gen;
+  msg('Loading…');
+  try {
+    const d = await api('post/list', { type_: S.comm ? 'All' : S.type, sort: S.sort, limit: 20, page, community_name: S.comm });
+    if (my !== gen) return;
+    const raw = d.posts || [];
+    const list = raw.filter(x => !x.post.nsfw && !x.community.nsfw && !x.post.removed && !x.post.deleted && !posts.has(x.post.id));
+    list.forEach(x => posts.set(x.post.id, x));
+    $('#feed').insertAdjacentHTML('beforeend', list.map(card).join(''));
+    page++;
+    moreAvail = raw.length > 0;
+    $('#more').hidden = !moreAvail || !$('#postView').hidden;
+    msg($('#feed').children.length ? '' : 'Nothing here.');
+  } catch(e){
+    if (my === gen) msg(errText(e));
+  }
+  if (my === gen) loading = false;
+}
+
+function updateWhere(){
+  const sortLabel = $('#sort').querySelector(`option[value="${S.sort}"]`);
+  $('#where').textContent = S.inst + (S.comm ? ' › ' + S.comm : (S.type === 'Local' ? ' › local' : ' › all')) + ' · ' + (sortLabel ? sortLabel.textContent : S.sort);
+}
+
+function showFeed(){
+  $('#postView').hidden = true;
+  $('#postView').innerHTML = '';
+  $('#feed').hidden = false;
+  $('#back').hidden = true;
+  updateWhere();
+  if (!$('#feed').children.length){ loadFeed(true); }
+  else { msg(''); $('#more').hidden = !moreAvail; window.scrollTo(0, feedScroll); }
+}
+
+function toFeed(reload){
+  $('#settings').hidden = true;
+  if (reload){ feedScroll = 0; gen++; loading = false; $('#feed').innerHTML = ''; }
+  if (location.hash) location.hash = ''; else showFeed();
+}
+
+// ---------- post + comments ----------
+function postHtml(pv){
+  const p = pv.post, c = pv.community, n = pv.counts;
+  const isImg = p.url && IMG_RE.test(p.url);
+  return `<article class="full">
+    <div class="meta"><button class="comm" data-c="${esc(fullName(c))}">${esc(fullName(c))}</button> · ${esc(fullName(pv.creator))} · ${ago(p.published)}</div>
+    <h1>${esc(p.name)}</h1>
+    ${p.url ? (isImg ? imgBtn(p.url) : `<div class="lnk">${link(p.url)}</div>`) : ''}
+    ${p.body ? `<div class="body">${md(p.body)}</div>` : ''}
+    <div class="meta">▲ ${n.score} · ${n.comments} comments · ${link(p.ap_id, 'original')}</div>
+  </article>`;
+}
+
+function tree(list){
+  if (!list.length) return '<div class="meta">No comments.</div>';
+  const ids = new Set(list.map(x => x.comment.id));
+  const kids = new Map();
+  list.forEach(x => {
+    const parts = String(x.comment.path || '').split('.');
+    let par = parts.length > 2 ? +parts[parts.length - 2] : 0;
+    if (!ids.has(par)) par = 0;
+    if (!kids.has(par)) kids.set(par, []);
+    kids.get(par).push(x);
+  });
+  const render = par => (kids.get(par) || []).map(x => {
+    const c = x.comment;
+    const body = c.deleted ? '<div class="p meta">deleted</div>' : c.removed ? '<div class="p meta">removed</div>' : md(c.content);
+    return `<details class="cmt" open><summary>${esc(fullName(x.creator))} · ▲${x.counts.score} · ${ago(c.published)}</summary>${body}${render(c.id)}</details>`;
+  }).join('');
+  return render(0);
+}
+
+let postGen = 0;
+async function showPost(id){
+  if (!$('#feed').hidden) feedScroll = window.scrollY;
+  const my = ++postGen;
+  $('#feed').hidden = true; $('#more').hidden = true; $('#settings').hidden = true; $('#back').hidden = false;
+  const v = $('#postView');
+  v.hidden = false; v.innerHTML = ''; window.scrollTo(0, 0);
+  let pv = posts.get(id);
+  try {
+    if (!pv){ msg('Loading…'); pv = (await api('post', { id })).post_view; if (my !== postGen) return; }
+    msg('');
+    v.innerHTML = postHtml(pv) + '<div id="cm"><div class="meta">Loading comments…</div></div>';
+    const d = await api('comment/list', { post_id: id, sort: 'Top', max_depth: 8, limit: 50, type_: 'All' });
+    if (my !== postGen || !$('#cm')) return;
+    $('#cm').innerHTML = tree(d.comments || []);
+  } catch(e){
+    if (my !== postGen) return;
+    if ($('#cm')) $('#cm').innerHTML = '<div class="meta">' + esc(errText(e)) + '</div>';
+    else msg(errText(e));
+  }
+}
+
+// ---------- routing ----------
+let cameFromFeed = false;
+function route(){
+  const m = location.hash.match(/^#p(\d+)$/);
+  if (m){ cameFromFeed = !$('#feed').hidden || cameFromFeed; showPost(+m[1]); }
+  else { cameFromFeed = false; postGen++; showFeed(); }
+}
+window.addEventListener('hashchange', route);
+$('#back').onclick = () => { if (cameFromFeed) history.back(); else location.hash = ''; };
+
+// ---------- taps ----------
+document.addEventListener('click', e => {
+  const b = e.target.closest('.imgbtn');
+  if (b){
+    e.preventDefault();
+    const img = new Image();
+    img.referrerPolicy = 'no-referrer';
+    img.alt = '';
+    img.className = 'pic';
+    img.onerror = () => { const d = document.createElement('div'); d.className = 'meta'; d.textContent = 'Image failed to load.'; img.replaceWith(d); };
+    img.src = b.dataset.src;
+    b.replaceWith(img);
+    return;
+  }
+  const cm = e.target.closest('.comm');
+  if (cm){
+    e.preventDefault();
+    S.comm = cm.dataset.c; save(); toFeed(true);
+  }
+});
+
+$('#more').onclick = () => loadFeed(false);
+
+// ---------- settings panel ----------
+function fillSettings(){
+  $('#inst').value = S.inst; $('#type').value = S.type; $('#sort').value = S.sort; $('#remember').checked = S.remember;
+}
+$('#setBtn').onclick = () => { const s = $('#settings'); s.hidden = !s.hidden; if (!s.hidden){ fillSettings(); window.scrollTo(0, 0); } };
+$('#apply').onclick = () => {
+  const v = $('#inst').value.trim().replace(/^https?:\/\//i, '').replace(/\/.*$/, '').toLowerCase();
+  if (!/^[a-z0-9.-]+\.[a-z]{2,}(:\d+)?$/.test(v)){ msg("That server address doesn't look right."); return; }
+  if (v !== S.inst) S.comm = '';
+  S.inst = v; S.type = $('#type').value; S.sort = $('#sort').value; S.remember = $('#remember').checked;
+  save(); toFeed(true);
+};
+$('#forget').onclick = () => {
+  store.clear(); Object.assign(S, DEFAULTS); fillSettings();
+  msg('Saved settings removed from this device.');
+};
+$('#clearComm').onclick = () => { S.comm = ''; save(); toFeed(true); };
+async function searchComms(){
+  const q = $('#q').value.trim();
+  if (!q) return;
+  $('#qres').innerHTML = '<div class="meta">Searching…</div>';
+  try {
+    const d = await api('search', { q, type_: 'Communities', listing_type: 'All', sort: 'TopAll', limit: 20 });
+    const list = (d.communities || []).filter(x => !x.community.nsfw);
+    $('#qres').innerHTML = list.map(x =>
+      `<button class="comm res" data-c="${esc(fullName(x.community))}">${esc(fullName(x.community))} <small>· ${x.counts.subscribers} subscribers</small></button>`
+    ).join('') || '<div class="meta">No matches.</div>';
+  } catch(e){
+    $('#qres').innerHTML = '<div class="meta">' + esc(errText(e)) + '</div>';
+  }
+}
+$('#qgo').onclick = searchComms;
+$('#q').addEventListener('keydown', e => { if (e.key === 'Enter') searchComms(); });
+
+// ---------- start ----------
+fillSettings();
+route();
+</script>
+</body>
+</html>
